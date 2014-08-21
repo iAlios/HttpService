@@ -15,6 +15,9 @@ HttpService
 	4. 主要的wwwroot是在assets目录下，sdcard中为下载或上传文件目录
 	5. 主要的控制相关的内容都需要到assets目录下
 
+	*** 注意  *** 
+	1. wwwroot中目录名称不能带有"."符号，否则视为文件处理
+
 功能内容
 ====
 	

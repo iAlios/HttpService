@@ -257,8 +257,8 @@ public class HttpServer extends NanoHTTPD {
 					"FORBIDDEN: Won't serve ../ for security reasons.");
 		}
 
-		String file = findIndexFileInDirectory(mAssetManager, uri);
-		if (file == null) {
+		AssetFile cAssetfile = findIndexFileInDirectory(mAssetManager, uri);
+		if (cAssetfile == null) {
 			boolean canServeUri = false;
 			File homeDir = null;
 			List<File> roots = getFileRootDirs();
@@ -319,9 +319,9 @@ public class HttpServer extends NanoHTTPD {
 					Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT,
 					"Error 404, file not found.");
 		} else {
-			String mimeTypeForFile = getMimeTypeForFile(file);
-			Response response = serveFile(mAssetManager, uri, headers, file,
-					mimeTypeForFile);
+			String mimeTypeForFile = getMimeTypeForFile(cAssetfile.mPath);
+			Response response = serveFile(mAssetManager, uri, headers,
+					cAssetfile.mPath, mimeTypeForFile);
 			return response != null ? response : createResponse(
 					Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT,
 					"Error 404, file not found.");
@@ -523,19 +523,24 @@ public class HttpServer extends NanoHTTPD {
 		return res;
 	}
 
-	private String findIndexFileInDirectory(AssetManager cAssetManager,
+	private AssetFile findIndexFileInDirectory(AssetManager cAssetManager,
 			String url) {
 		String dir = mAssetRootFile + url;
 		if (dir.endsWith("/")) {
 			dir = dir.substring(0, dir.length() - 1);
 		}
-		for (AssetFile file : mAssetRootDirs) {
-			if (file.mPath.equals(dir)) {
-				return file.mPath;
+		if (dir.matches(".*[.].*$")) { // 目录名称中不能存在"."
+			for (AssetFile file : mAssetRootDirs) {
+				if (file.mPath.equals(dir)) {
+					return file;
+				}
 			}
-			for (String fileName : INDEX_FILE_NAMES) {
-				if (file.mPath.equals(dir + File.separator + fileName)) {
-					return file.mPath;
+		} else {
+			for (AssetFile file : mAssetRootDirs) {
+				for (String fileName : INDEX_FILE_NAMES) {
+					if (file.mPath.equals(dir + File.separator + fileName)) {
+						return file;
+					}
 				}
 			}
 		}
