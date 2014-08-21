@@ -19,6 +19,7 @@ import java.util.StringTokenizer;
 import android.content.res.AssetManager;
 import android.text.TextUtils;
 
+import com.alios.httpservices.service.AssetFile;
 import com.alios.httpservices.utils.MLog;
 
 public class HttpServer extends NanoHTTPD {
@@ -73,10 +74,11 @@ public class HttpServer extends NanoHTTPD {
 
 	private static Map<String, IHttpPlugin> mimeTypeHandlers = new HashMap<String, IHttpPlugin>();
 	private final List<File> mFileRootDirs;
-	private final List<String> mAssetRootDirs;
+	private final List<AssetFile> mAssetRootDirs;
 	private final boolean quiet;
 
 	private AssetManager mAssetManager = null;
+	private String mAssetRootFile;
 
 	public HttpServer(AssetManager cAssetManager, int port,
 			String assetWwwroot, File fileDirRoot) {
@@ -101,7 +103,8 @@ public class HttpServer extends NanoHTTPD {
 		if (fileDirRoot != null) {
 			this.mFileRootDirs.add(fileDirRoot);
 		}
-		this.mAssetRootDirs = new ArrayList<String>();
+		this.mAssetRootFile = wwwroot;
+		this.mAssetRootDirs = new ArrayList<AssetFile>();
 		addAssetRoot(wwwroot);
 	}
 
@@ -115,7 +118,7 @@ public class HttpServer extends NanoHTTPD {
 				if (isAssetDir(cAssetManager, subDir)) {
 					ergodicAssetDir(cAssetManager, subDir);
 				} else {
-					this.mAssetRootDirs.add(subDir);
+					this.mAssetRootDirs.add(new AssetFile(false, subDir));
 				}
 			}
 		} catch (IOException e) {
@@ -131,6 +134,7 @@ public class HttpServer extends NanoHTTPD {
 				return true;
 			}
 		} catch (IOException e) {
+			MLog.d("!!! can not list the file: " + e.getLocalizedMessage(), e);
 		}
 		return false;
 	}
@@ -521,13 +525,17 @@ public class HttpServer extends NanoHTTPD {
 
 	private String findIndexFileInDirectory(AssetManager cAssetManager,
 			String url) {
-		String dir = url.replaceFirst("[/]", "");
-		for (String file : mAssetRootDirs) {
-			if (file.contains(dir)) {
-				for (String fileName : INDEX_FILE_NAMES) {
-					if (file.endsWith(fileName)) {
-						return file;
-					}
+		String dir = mAssetRootFile + url;
+		if (dir.endsWith("/")) {
+			dir = dir.substring(0, dir.length() - 1);
+		}
+		for (AssetFile file : mAssetRootDirs) {
+			if (file.mPath.equals(dir)) {
+				return file.mPath;
+			}
+			for (String fileName : INDEX_FILE_NAMES) {
+				if (file.mPath.equals(dir + File.separator + fileName)) {
+					return file.mPath;
 				}
 			}
 		}
