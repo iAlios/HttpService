@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 
+import com.alios.httpservices.utils.PackageUtils;
+
 public final class ResourceManager {
 
 	private static final ResourceManager INSTANCE = new ResourceManager();
@@ -26,13 +28,19 @@ public final class ResourceManager {
 		return INSTANCE;
 	}
 
-	public void registerReceiver(Context context) {
+	public void enterApplication(Context context) {
 		IntentFilter filter = new IntentFilter();
 		filter.addAction(Intent.ACTION_TIME_TICK);
 		context.getApplicationContext().registerReceiver(mTimeChangedReceiver,
 				filter);
 		mSharedPreferences = context.getSharedPreferences(SHARED_PREF_NAME,
 				Context.MODE_PRIVATE);
+		if (!PackageUtils.hasServiceStarted(context,
+				HttpServices.class.getName())) {
+			Intent intent = new Intent();
+			intent.setClass(context, HttpServices.class);
+			context.startService(intent);
+		}
 	}
 
 	public int getDefaultPort() {

@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
 
+import android.content.res.AssetManager;
+import android.text.TextUtils;
+
 import com.alios.httpservices.utils.MLog;
 
 public class HttpServer extends NanoHTTPD {
@@ -69,28 +72,73 @@ public class HttpServer extends NanoHTTPD {
 	};
 
 	private static Map<String, IHttpPlugin> mimeTypeHandlers = new HashMap<String, IHttpPlugin>();
-	private final List<File> rootDirs;
+	private final List<File> mFileRootDirs;
+	private final List<String> mAssetRootDirs;
 	private final boolean quiet;
 
-	public HttpServer(int port, File wwwroot) {
-		this(null, port, wwwroot, true);
+	private AssetManager mAssetManager = null;
+
+	public HttpServer(AssetManager cAssetManager, int port,
+			String assetWwwroot, File fileDirRoot) {
+		this(cAssetManager, null, port, assetWwwroot, fileDirRoot, true);
 	}
 
-	public HttpServer(int port, File wwwroot, boolean quiet) {
-		this(null, port, wwwroot, quiet);
+	public HttpServer(AssetManager cAssetManager, int port, File fileDirRoot) {
+		this(cAssetManager, null, port, null, fileDirRoot, true);
 	}
 
-	public HttpServer(String host, int port, File wwwroot, boolean quiet) {
+	public HttpServer(AssetManager cAssetManager, int port, String wwwroot,
+			File fileDirRoot, boolean quiet) {
+		this(cAssetManager, null, port, wwwroot, fileDirRoot, quiet);
+	}
+
+	public HttpServer(AssetManager cAssetManager, String host, int port,
+			String wwwroot, File fileDirRoot, boolean quiet) {
 		super(host, port);
+		this.mAssetManager = cAssetManager;
 		this.quiet = quiet;
-		this.rootDirs = new ArrayList<File>();
-		this.rootDirs.add(wwwroot);
+		this.mFileRootDirs = new ArrayList<File>();
+		if (fileDirRoot != null) {
+			this.mFileRootDirs.add(fileDirRoot);
+		}
+		this.mAssetRootDirs = new ArrayList<String>();
+		addAssetRoot(wwwroot);
 	}
 
-	public HttpServer(String host, int port, List<File> wwwroots, boolean quiet) {
-		super(host, port);
-		this.quiet = quiet;
-		this.rootDirs = new ArrayList<File>(wwwroots);
+	private void ergodicAssetDir(AssetManager cAssetManager, String dir) {
+		try {
+			String paths[] = cAssetManager.list(dir);
+			String subDirPath = dir + File.separator;
+			String subDir = null;
+			for (String path : paths) {
+				subDir = subDirPath + path;
+				if (isAssetDir(cAssetManager, subDir)) {
+					ergodicAssetDir(cAssetManager, subDir);
+				} else {
+					this.mAssetRootDirs.add(subDir);
+				}
+			}
+		} catch (IOException e) {
+			MLog.d("!!! Can not ergodic the asset dir: "
+					+ e.getLocalizedMessage(), e);
+		}
+	}
+
+	private boolean isAssetDir(AssetManager cAssetManager, String path) {
+		try {
+			String[] list = cAssetManager.list(path);
+			if (list.length > 0) {
+				return true;
+			}
+		} catch (IOException e) {
+		}
+		return false;
+	}
+
+	public void addAssetRoot(String wwwroot) {
+		if (!TextUtils.isEmpty(wwwroot)) {
+			ergodicAssetDir(mAssetManager, wwwroot);
+		}
 	}
 
 	/**
@@ -123,16 +171,16 @@ public class HttpServer extends NanoHTTPD {
 		plugin.initialize(commandLineOptions);
 	}
 
-	public File getRootDir() {
-		return rootDirs.get(0);
+	public File getFileRootDir() {
+		return mFileRootDirs.get(0);
 	}
 
-	private List<File> getRootDirs() {
-		return rootDirs;
+	private List<File> getFileRootDirs() {
+		return mFileRootDirs;
 	}
 
 	public void addWwwRootDir(File wwwroot) {
-		rootDirs.add(wwwroot);
+		mFileRootDirs.add(wwwroot);
 	}
 
 	/**
@@ -178,7 +226,7 @@ public class HttpServer extends NanoHTTPD {
 			}
 		}
 
-		for (File homeDir : getRootDirs()) {
+		for (File homeDir : getFileRootDirs()) {
 			// Make sure we won't die of an exception later
 			if (!homeDir.isDirectory()) {
 				return createResponse(Response.Status.INTERNAL_ERROR,
@@ -205,64 +253,147 @@ public class HttpServer extends NanoHTTPD {
 					"FORBIDDEN: Won't serve ../ for security reasons.");
 		}
 
-		boolean canServeUri = false;
-		File homeDir = null;
-		List<File> roots = getRootDirs();
-		for (int i = 0; !canServeUri && i < roots.size(); i++) {
-			homeDir = roots.get(i);
-			canServeUri = canServeUri(uri, homeDir);
-		}
-		if (!canServeUri) {
-			return createResponse(Response.Status.NOT_FOUND,
-					NanoHTTPD.MIME_PLAINTEXT, "Error 404, file not found.");
-		}
+		String file = findIndexFileInDirectory(mAssetManager, uri);
+		if (file == null) {
+			boolean canServeUri = false;
+			File homeDir = null;
+			List<File> roots = getFileRootDirs();
+			for (int i = 0; !canServeUri && i < roots.size(); i++) {
+				homeDir = roots.get(i);
+				canServeUri = canServeUri(uri, homeDir);
+			}
+			if (!canServeUri) {
+				return createResponse(Response.Status.NOT_FOUND,
+						NanoHTTPD.MIME_PLAINTEXT, "Error 404, file not found.");
+			}
 
-		// Browsers get confused without '/' after the directory, send a
-		// redirect.
-		File f = new File(homeDir, uri);
-		if (f.isDirectory() && !uri.endsWith("/")) {
-			uri += "/";
-			Response res = createResponse(Response.Status.REDIRECT,
-					NanoHTTPD.MIME_HTML, "<html><body>Redirected: <a href=\""
-							+ uri + "\">" + uri + "</a></body></html>");
-			res.addHeader("Location", uri);
-			return res;
-		}
+			// Browsers get confused without '/' after the directory, send a
+			// redirect.
+			File f = new File(homeDir, uri);
+			if (f.isDirectory() && !uri.endsWith("/")) {
+				uri += "/";
+				Response res = createResponse(Response.Status.REDIRECT,
+						NanoHTTPD.MIME_HTML,
+						"<html><body>Redirected: <a href=\"" + uri + "\">"
+								+ uri + "</a></body></html>");
+				res.addHeader("Location", uri);
+				return res;
+			}
 
-		if (f.isDirectory()) {
-			// First look for index files (index.html, index.htm, etc) and if
-			// none found, list the directory if readable.
-			String indexFile = findIndexFileInDirectory(f);
-			if (indexFile == null) {
-				if (f.canRead()) {
-					// No index file, list the directory if it is readable
-					return createResponse(Response.Status.OK,
-							NanoHTTPD.MIME_HTML, listDirectory(uri, f));
+			if (f.isDirectory()) {
+				// First look for index files (index.html, index.htm, etc) and
+				// if
+				// none found, list the directory if readable.
+				String indexFile = findIndexFileInDirectory(f);
+				if (indexFile == null) {
+					if (f.canRead()) {
+						// No index file, list the directory if it is readable
+						return createResponse(Response.Status.OK,
+								NanoHTTPD.MIME_HTML, listDirectory(uri, f));
+					} else {
+						return createResponse(Response.Status.FORBIDDEN,
+								NanoHTTPD.MIME_PLAINTEXT,
+								"FORBIDDEN: No directory listing.");
+					}
 				} else {
-					return createResponse(Response.Status.FORBIDDEN,
-							NanoHTTPD.MIME_PLAINTEXT,
-							"FORBIDDEN: No directory listing.");
+					return respond(headers, uri + indexFile);
+				}
+			}
+			String mimeTypeForFile = getMimeTypeForFile(uri);
+			IHttpPlugin plugin = mimeTypeHandlers.get(mimeTypeForFile);
+			Response response = null;
+			if (plugin != null) {
+				response = plugin.serveFile(uri, headers, f, mimeTypeForFile);
+				if (response != null && response instanceof UploadFileResponse) {
+					UploadFileResponse rewrite = (UploadFileResponse) response;
+					return respond(rewrite.getHeaders(), rewrite.getUri());
 				}
 			} else {
-				return respond(headers, uri + indexFile);
+				response = serveFile(uri, headers, f, mimeTypeForFile);
 			}
+			return response != null ? response : createResponse(
+					Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT,
+					"Error 404, file not found.");
+		} else {
+			String mimeTypeForFile = getMimeTypeForFile(file);
+			Response response = serveFile(mAssetManager, uri, headers, file,
+					mimeTypeForFile);
+			return response != null ? response : createResponse(
+					Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT,
+					"Error 404, file not found.");
+		}
+	}
+
+	private Response serveFile(AssetManager cAssetManager, String uri,
+			Map<String, String> header, String file, String mime) {
+		Response res;
+		try {
+			InputStream cInputStream = cAssetManager.open(file);
+			long fileLen = cInputStream.available();
+			// Calculate etag
+			String etag = Integer.toHexString((file + "" + fileLen).hashCode());
+
+			// Support (simple) skipping:
+			long startFrom = 0;
+			long endAt = -1;
+			String range = header.get("range");
+			if (range != null) {
+				if (range.startsWith("bytes=")) {
+					range = range.substring("bytes=".length());
+					int minus = range.indexOf('-');
+					try {
+						if (minus > 0) {
+							startFrom = Long.parseLong(range
+									.substring(0, minus));
+							endAt = Long.parseLong(range.substring(minus + 1));
+						}
+					} catch (NumberFormatException ignored) {
+					}
+				}
+			}
+
+			// Change return code and add Content-Range header when skipping is
+			// requested
+			if (range != null && startFrom >= 0) {
+				if (startFrom >= fileLen) {
+					res = createResponse(Response.Status.RANGE_NOT_SATISFIABLE,
+							NanoHTTPD.MIME_PLAINTEXT, "");
+					res.addHeader("Content-Range", "bytes 0-0/" + fileLen);
+					res.addHeader("ETag", etag);
+				} else {
+					if (endAt < 0) {
+						endAt = fileLen - 1;
+					}
+					long newLen = endAt - startFrom + 1;
+					if (newLen < 0) {
+						newLen = 0;
+					}
+
+					final long dataLen = newLen;
+					cInputStream.skip(startFrom);
+
+					res = createResponse(Response.Status.PARTIAL_CONTENT, mime,
+							cInputStream);
+					res.addHeader("Content-Length", "" + dataLen);
+					res.addHeader("Content-Range", "bytes " + startFrom + "-"
+							+ endAt + "/" + fileLen);
+					res.addHeader("ETag", etag);
+				}
+			} else {
+				if (etag.equals(header.get("if-none-match")))
+					res = createResponse(Response.Status.NOT_MODIFIED, mime, "");
+				else {
+					res = createResponse(Response.Status.OK, mime, cInputStream);
+					res.addHeader("Content-Length", "" + fileLen);
+					res.addHeader("ETag", etag);
+				}
+			}
+		} catch (IOException ioe) {
+			res = createResponse(Response.Status.FORBIDDEN,
+					NanoHTTPD.MIME_PLAINTEXT, "FORBIDDEN: Reading file failed.");
 		}
 
-		String mimeTypeForFile = getMimeTypeForFile(uri);
-		IHttpPlugin plugin = mimeTypeHandlers.get(mimeTypeForFile);
-		Response response = null;
-		if (plugin != null) {
-			response = plugin.serveFile(uri, headers, f, mimeTypeForFile);
-			if (response != null && response instanceof UploadFileResponse) {
-				UploadFileResponse rewrite = (UploadFileResponse) response;
-				return respond(rewrite.getHeaders(), rewrite.getUri());
-			}
-		} else {
-			response = serveFile(uri, headers, f, mimeTypeForFile);
-		}
-		return response != null ? response : createResponse(
-				Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT,
-				"Error 404, file not found.");
+		return res;
 	}
 
 	private boolean canServeUri(String uri, File homeDir) {
@@ -386,6 +517,21 @@ public class HttpServer extends NanoHTTPD {
 		Response res = new Response(status, mimeType, message);
 		res.addHeader("Accept-Ranges", "bytes");
 		return res;
+	}
+
+	private String findIndexFileInDirectory(AssetManager cAssetManager,
+			String url) {
+		String dir = url.replaceFirst("[/]", "");
+		for (String file : mAssetRootDirs) {
+			if (file.contains(dir)) {
+				for (String fileName : INDEX_FILE_NAMES) {
+					if (file.endsWith(fileName)) {
+						return file;
+					}
+				}
+			}
+		}
+		return null;
 	}
 
 	private String findIndexFileInDirectory(File directory) {

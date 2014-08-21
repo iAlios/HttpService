@@ -11,7 +11,7 @@ public class MApplication extends Application {
 	public void onCreate() {
 		super.onCreate();
 		MLog.init(this);
-		ResourceManager.getInstance().registerReceiver(this);
+		ResourceManager.getInstance().enterApplication(this);
 	}
 
 }
